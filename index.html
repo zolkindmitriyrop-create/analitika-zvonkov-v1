@@ -1000,6 +1000,7 @@ body::before{
   .history-eff{min-width:auto;text-align:left}
 }
 </style>
+<base target="_blank">
 </head>
 <body>
 <div class="app">
@@ -1056,7 +1057,7 @@ body::before{
         </div>
         <div class="form-field" style="flex:2">
           <label>Прокси-URL (CORS) <a href="#" onclick="showProxyHelp();return false;" style="color:var(--chart-1);font-size:11px">Зачем?</a></label>
-          <input type="text" id="yandex-proxy-url" placeholder="Оставьте пустым — используется встроенный прокси" value="">
+          <input type="text" id="yandex-proxy-url" placeholder="https://your-worker.workers.dev" value="">
         </div>
       </div>
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -2245,28 +2246,12 @@ function showTab(id, btn) {
 function showSetup() { document.getElementById('setup-overlay').classList.add('show'); }
 function closeSetup() { document.getElementById('setup-overlay').classList.remove('show'); }
 
-function waitForSupabaseSDK(maxWaitMs) {
-  return new Promise(function(resolve) {
-    var waited = 0, step = 300;
-    (function check() {
-      if (typeof window.supabase !== 'undefined' && window.supabase && window.supabase.createClient) { resolve(true); return; }
-      waited += step;
-      if (waited >= maxWaitMs) { resolve(false); return; }
-      setTimeout(check, step);
-    })();
-  });
-}
-
 async function connectSupabase() {
   const url = document.getElementById('setup-url').value.trim();
   const key = document.getElementById('setup-key').value.trim();
   if(!url || !key){ alert('Введите URL и ключ'); return; }
-  const btn = document.querySelector('#setup-overlay .btn-primary');
-  if(btn) { btn.disabled = true; btn.textContent = 'Проверка SDK...'; }
-  const ready = await waitForSupabaseSDK(5000);
-  if(btn) { btn.disabled = false; btn.textContent = '🔗 Подключить'; }
-  if(!ready) {
-    alert('Не удалось загрузить Supabase SDK за 5 секунд. Проверьте: 1) подключение к интернету, 2) не блокирует ли CDN расширение-блокировщик рекламы или антивирус, 3) откройте консоль браузера (F12) и посмотрите, есть ли красная ошибка на строке со ссылкой на supabase-js. Затем обновите страницу и попробуйте снова.');
+  if(typeof window.supabase === 'undefined' || !window.supabase || !window.supabase.createClient) {
+    alert('Supabase SDK ещё загружается. Подождите 2–3 секунды и попробуйте снова, или обновите страницу.');
     return;
   }
   try {
@@ -2415,11 +2400,7 @@ function showYandexHelp() {
 function showProxyHelp() {
   alert(`Yandex Cloud блокирует прямые запросы из браузера (CORS).
 
-Если сайт задеплоен на Vercel (как этот проект), это уже решено — запросы автоматически идут через встроенную функцию /api/yandex-proxy, поле «Прокси-URL» можно оставить пустым.
-
-Если ошибка всё равно появляется — проверьте, что в репозитории есть файл api/yandex-proxy.js и что он задеплоен вместе с остальным проектом.
-
-Альтернатива для других хостингов — свой прокси на Cloudflare Workers:
+Решение — бесплатный прокси на Cloudflare Workers:
 
 1. Перейдите на workers.cloudflare.com
 2. Создайте Worker, вставьте код:
@@ -2427,14 +2408,16 @@ function showProxyHelp() {
 export default {
   async fetch(request) {
     const url = new URL(request.url);
-    const target = "https://" + url.pathname.slice(1);
+    const target = url.searchParams.get('target');
+    if (!target) return new Response('Missing ?target=', {status: 400});
     const modified = new Request(target, request);
     return fetch(modified);
   }
 };
 
 3. Получите URL вида https://your-worker.workers.dev
-4. Вставьте его в поле «Прокси-URL»`);
+4. Вставьте его в поле «Прокси-URL»
+5. Запросы пойдут через прокси, CORS пропадёт`);
 }
 
 async function transcribeAudio() {
@@ -2453,6 +2436,16 @@ async function transcribeAudio() {
   status.textContent = 'Чтение файла...';
   progress.style.display = 'block';
   bar.style.width = '20%';
+
+  var useProxy = proxyUrl.length > 0;
+  var proxyBase = useProxy ? proxyUrl.replace(/\/$/, '') : '';
+  function makeUrl(host, path) {
+    if (useProxy) {
+      return proxyBase + '/?target=https://' + host + path;
+    }
+    return 'https://' + host + path;
+  }
+
   try {
     var arrayBuffer = await file.arrayBuffer();
     var bytes = new Uint8Array(arrayBuffer);
@@ -2461,10 +2454,8 @@ async function transcribeAudio() {
     var base64 = btoa(binary);
     bar.style.width = '40%';
     status.textContent = 'Отправка в Yandex SpeechKit...';
-    var apiBase = proxyUrl ? proxyUrl.replace(/\/$/, '') + '/transcribe.api.cloud.yandex.net' : '/api/yandex-proxy?path=';
-    var opBase = proxyUrl ? proxyUrl.replace(/\/$/, '') + '/operation.api.cloud.yandex.net' : '/api/yandex-proxy?path=';
-    var recognizeUrl = proxyUrl ? apiBase + '/speech/stt/v2/longRunningRecognize' : apiBase + encodeURIComponent('speech/stt/v2/longRunningRecognize');
-    var res = await fetch(recognizeUrl, {
+
+    var res = await fetch(makeUrl('transcribe.api.cloud.yandex.net', '/speech/stt/v2/longRunningRecognize'), {
       method: 'POST',
       headers: {
         'Authorization': 'Api-Key ' + apiKey,
@@ -2485,15 +2476,20 @@ async function transcribeAudio() {
         audio: { content: base64 }
       })
     });
+
+    if (!res.ok) {
+      var errBody = await res.text();
+      throw new Error('HTTP ' + res.status + ' от Yandex: ' + errBody.slice(0, 300));
+    }
+
     bar.style.width = '50%';
     var data = await res.json();
-    if(!res.ok || data.error || data.error_code || (data.code !== undefined && data.message)) {
-      var errText = data.message || data.error_message || data.error || ('HTTP ' + res.status);
-      throw new Error(errText);
+    if(data.error || data.error_code || data.code) {
+      throw new Error(data.error_message || data.error || data.message || 'Ошибка распознавания');
     }
 
     var operationId = data.id;
-    if(!operationId) throw new Error('Не получен ID операции распознавания. Ответ сервера: ' + JSON.stringify(data).slice(0, 300));
+    if(!operationId) throw new Error('Не получен ID операции распознавания');
 
     status.textContent = 'Распознавание в процессе...';
     var text = '';
@@ -2503,18 +2499,26 @@ async function transcribeAudio() {
     var totalWords = 0;
     var lastSpeaker = -1;
     var maxAttempts = 60;
+    var done = false;
+
     for(var attempt = 0; attempt < maxAttempts; attempt++) {
       await new Promise(function(r) { setTimeout(r, 2000); });
       status.textContent = 'Ожидание результата... (' + (attempt + 1) + '/' + maxAttempts + ')';
       bar.style.width = (50 + (attempt / maxAttempts) * 40) + '%';
 
-      var operationUrl = proxyUrl ? opBase + '/operations/' + operationId : opBase + encodeURIComponent('operations/' + operationId);
-      var opRes = await fetch(operationUrl, {
+      var opRes = await fetch(makeUrl('operation.api.cloud.yandex.net', '/operations/' + operationId), {
         headers: { 'Authorization': 'Api-Key ' + apiKey }
       });
+
+      if (!opRes.ok) {
+        var opErr = await opRes.text();
+        throw new Error('HTTP ' + opRes.status + ' при проверке статуса: ' + opErr.slice(0, 300));
+      }
+
       var opData = await opRes.json();
 
       if(opData.done) {
+        done = true;
         if(opData.error) throw new Error(opData.error.message || 'Ошибка в операции распознавания');
         if(opData.response && opData.response.chunks) {
           opData.response.chunks.forEach(function(chunk) {
@@ -2537,6 +2541,7 @@ async function transcribeAudio() {
       }
     }
 
+    if(!done) throw new Error('Распознавание заняло слишком много времени (>2 мин). Попробуйте позже.');
     if(!text) throw new Error('Распознавание не вернуло текст. Возможно, файл пустой или формат не поддерживается.');
 
     var duration = Math.round(file.size / 16000);
@@ -2575,16 +2580,17 @@ async function transcribeAudio() {
     }
 
     bar.style.width = '100%';
-    status.textContent = '✅ Готово! Текст вставлен (' + totalWords + ' слов, ' + duration + 'с, WPM ' + wpm + ').';
+    status.innerHTML = '✅ Готово! Текст вставлен (' + totalWords + ' слов, ' + duration + 'с, WPM ' + wpm + '). Менеджер ' + managerRatio + '% речи.';
     setTimeout(function(){ progress.style.display = 'none'; bar.style.width = '0%'; }, 3000);
   } catch(err) {
     var msg = err.message || '';
-    if(msg.indexOf('Failed to fetch') !== -1 || msg.indexOf('NetworkError') !== -1) {
-      status.innerHTML = '❌ CORS/сеть. <a href="#" onclick="showProxyHelp();return false;" style="color:var(--chart-1)">Нужен прокси →</a>';
+    if(msg.indexOf('Failed to fetch') !== -1 || msg.indexOf('NetworkError') !== -1 || msg.indexOf('fetch') !== -1) {
+      status.innerHTML = '❌ CORS/сеть. Проверьте прокси-URL и обновите Worker по инструкции «Зачем?» →';
     } else {
       status.textContent = '❌ Ошибка: ' + msg;
     }
     bar.style.width = '0%';
+    console.error('Transcribe error:', err);
   } finally {
     btn.disabled = false;
   }
