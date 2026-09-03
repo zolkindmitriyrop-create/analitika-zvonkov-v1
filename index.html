@@ -4,35 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Оценка звонков — Альфаком PRO</title>
-<script>
-window.__supabaseLoaded = false;
-window.__supabaseLoadError = null;
-function onSupabaseLoad() { window.__supabaseLoaded = true; updateSdkStatus(); }
-function onSupabaseError() {
-  window.__supabaseLoadError = 'cdn.jsdelivr.net недоступен';
-  var s = document.createElement('script');
-  s.src = 'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-  s.onload = function() { window.__supabaseLoaded = true; window.__supabaseLoadError = null; updateSdkStatus(); };
-  s.onerror = function() {
-    window.__supabaseLoadError = 'unpkg.com тоже недоступен. Попробуйте VPN или загрузите файл локально.';
-    updateSdkStatus();
-  };
-  document.head.appendChild(s);
-}
-function updateSdkStatus() {
-  var badge = document.getElementById('db-status');
-  if(!badge) return;
-  if(window.__supabaseLoaded) {
-    badge.textContent = 'SDK загружен (ожидание подключения)';
-    badge.className = 'badge badge-online';
-  } else if(window.__supabaseLoadError) {
-    badge.textContent = 'OFFLINE — ' + window.__supabaseLoadError;
-    badge.className = 'badge badge-offline';
-  }
-}
-setTimeout(updateSdkStatus, 1000);
-</script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" onload="onSupabaseLoad()" onerror="onSupabaseError()"></script>
+<!-- Google Sheets integration: no external SDK needed -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
@@ -211,6 +183,32 @@ body::before{
   border-color:rgba(99,102,241,0.5);
   box-shadow:0 0 0 4px rgba(99,102,241,0.08);
   background:rgba(255,255,255,0.05);
+}
+
+.form-field select option,
+.form-field select optgroup{
+  background:#0f0f1a;
+  color:var(--text-primary);
+  font-size:14px;
+  padding:8px;
+}
+
+.form-field select option:hover,
+.form-field select option:focus,
+.form-field select option:checked{
+  background:var(--gradient-1);
+  color:#fff;
+}
+
+/* Кросс-браузер: убираем системный стрелочный фон у select */
+.form-field select{
+  appearance:none;
+  -webkit-appearance:none;
+  -moz-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat:no-repeat;
+  background-position:right 14px center;
+  padding-right:36px;
 }
 
 .btn-primary{
@@ -1048,7 +1046,7 @@ body::before{
     <div class="status-bar">
       <span>База данных:</span>
       <span class="badge badge-offline" id="db-status">OFFLINE (localStorage)</span>
-      <button class="btn-ghost" style="padding:5px 12px;font-size:11px" onclick="showSetup()">⚙️ Подключить Supabase</button>
+      <button class="btn-ghost" style="padding:5px 12px;font-size:11px" onclick="showSetup()">⚙️ Подключить Google Sheets</button>
     </div>
     <div class="form-row">
       <div class="form-field" style="flex:2">
@@ -1243,16 +1241,15 @@ body::before{
 <div class="modal-overlay" id="setup-overlay" onclick="closeSetup()">
   <div class="modal-box" onclick="event.stopPropagation()" style="max-width:520px">
     <button class="modal-close" onclick="closeSetup()">×</button>
-    <h4 style="margin-bottom:10px">⚙️ Подключение Supabase</h4>
+    <h4 style="margin-bottom:10px">⚙️ Подключение Google Sheets</h4>
     <p style="font-size:12px;color:var(--text-secondary);line-height:1.7;margin-bottom:16px">
-      1. Зарегистрируйтесь на <a href="https://supabase.com" target="_blank" style="color:var(--chart-1)">supabase.com</a><br>
-      2. Создайте проект → New Table "evaluations"<br>
-      3. Скопируйте URL и anon key из Settings → API<br>
-      4. Вставьте их ниже:
+      1. Создайте Google Sheet → Extensions → Apps Script<br>
+      2. Вставьте код из инструкции → Deploy → New deployment → Web App<br>
+      3. Скопируйте URL вида <code>https://script.google.com/.../exec</code><br>
+      4. Вставьте его ниже:
     </p>
-    <div class="form-field" style="margin-bottom:10px"><label>Supabase URL</label><input type="text" id="setup-url" placeholder="https://xxxx.supabase.co"></div>
-    <div class="form-field" style="margin-bottom:16px"><label>Supabase Anon Key</label><input type="text" id="setup-key" placeholder="eyJ..."></div>
-    <button class="btn-primary" onclick="connectSupabase()">🔗 Подключить</button>
+    <div class="form-field" style="margin-bottom:16px"><label>URL Google Apps Script Web App</label><input type="text" id="setup-url" placeholder="https://script.google.com/macros/s/.../exec"></div>
+    <button class="btn-primary" onclick="connectSheets()">🔗 Подключить</button>
   </div>
 </div>
 
@@ -1266,49 +1263,20 @@ body::before{
 
 <script>
 
-// ===== SUPABASE SETUP (lazy init) =====
-var supabase = null, useSupabase = false;
+// ===== GOOGLE SHEETS SETUP =====
+var sheetsUrl = localStorage.getItem('alfacom_sheets_url') || '';
+var useSheets = false;
 
-function initSupabase() {
-  var url = localStorage.getItem('sb_url') || '';
-  var key = localStorage.getItem('sb_key') || '';
-  if (!url || !key) return false;
-  url = url.replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '');
-  if (typeof window.supabase === 'undefined' || !window.supabase || !window.supabase.createClient) {
-    console.warn('Supabase SDK not loaded yet');
-    var badge = document.getElementById('db-status');
-    if(badge && !useSupabase) { badge.textContent = 'OFFLINE (SDK не загружен — проверьте VPN)'; badge.className = 'badge badge-offline'; }
-    return false;
-  }
-  try {
-    supabase = window.supabase.createClient(url, key);
-    useSupabase = true;
-    var badge = document.getElementById('db-status');
-    if (badge) { badge.textContent = 'ONLINE (Supabase)'; badge.className = 'badge badge-online'; }
-    return true;
-  } catch(e) {
-    console.error('Supabase init error:', e);
-    supabase = null;
-    useSupabase = false;
-    var badge = document.getElementById('db-status');
-    if(badge) { badge.textContent = 'OFFLINE (ошибка инициализации)'; badge.className = 'badge badge-offline'; }
-    return false;
-  }
+function initSheets() {
+  sheetsUrl = localStorage.getItem('alfacom_sheets_url') || '';
+  if (!sheetsUrl) return false;
+  useSheets = true;
+  var badge = document.getElementById('db-status');
+  if (badge) { badge.textContent = 'ONLINE (Google Sheets)'; badge.className = 'badge badge-online'; }
+  loadHistory();
+  return true;
 }
-
-// Try init after page load (with retry in case CDN is slow)
-function tryInitSupabase(retries) {
-  retries = retries || 0;
-  if (initSupabase()) return;
-  if (retries < 30) {
-    setTimeout(function() { tryInitSupabase(retries + 1); }, 600);
-  } else {
-    console.warn('Supabase SDK не загрузился после 30 попыток (~18 сек). Работаем в offline-режиме.');
-    var badge = document.getElementById('db-status');
-    if(badge) { badge.textContent = 'OFFLINE (SDK не загружен — CDN заблокирован?)'; badge.className = 'badge badge-offline'; }
-  }
-}
-tryInitSupabase();
+initSheets();
 
 // ===== DEFAULT SCRIPTS =====
 const DEFAULT_SCRIPTS = {
@@ -1555,7 +1523,7 @@ function evaluateCall() {
     } catch(err) {
       document.getElementById('loading-overlay').classList.remove('show');
       console.error('Ошибка оценки:', err);
-      alert('Ошибка при оценке: ' + (err.message || err) + '. Попробуйте очистить форму (🗑️) или обновить страницу.');
+      alert('Ошибка при оценке: ' + (err.message || err) + '. Попробуйте очистить форму или обновить страницу.');
     }
   }, 600);
 }
@@ -1765,19 +1733,34 @@ function renderRecommendations(res) {
 }
 
 async function loadHistory() {
-  if(useSupabase && supabase){
+  if(useSheets && sheetsUrl){
     try {
-      const {data, error} = await supabase.from('evaluations').select('*').order('created_at', {ascending: false});
-      if(!error && data) {
-        historyCache = data.map(d => {
-          let crit = [];
-          try { crit = JSON.parse(d.criteria_json || '[]'); } catch(e){}
-          return {...d, criteria: crit};
-        });
-      } else {
-        historyCache = JSON.parse(localStorage.getItem('call_eval_history') || '[]');
-      }
+      var res = await fetch(sheetsUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'list'})
+      });
+      var data = await res.json();
+      if(data.error) throw new Error(data.error);
+      historyCache = (data.data || []).map(function(d){
+        var crit = [];
+        try { crit = JSON.parse(d.criteria_json || '[]'); } catch(e){}
+        return {
+          id: d.id,
+          employee: d.employee,
+          date: d.date,
+          client: d.client,
+          scriptId: d.scriptId,
+          scriptName: d.scriptName,
+          total: Number(d.total),
+          avg: Number(d.avg),
+          eff: Number(d.eff),
+          critCount: Number(d.critCount),
+          criteria: crit
+        };
+      });
     } catch(e) {
+      console.error('Sheets load error:', e);
       historyCache = JSON.parse(localStorage.getItem('call_eval_history') || '[]');
     }
   } else {
@@ -1789,7 +1772,9 @@ async function loadHistory() {
 
 async function saveToHistory() {
   if(!currentResult) return;
-  const payload = {
+  var payload = {
+    action: 'save',
+    id: String(Date.now()),
     employee: currentResult.employee,
     date: currentResult.date,
     client: currentResult.client,
@@ -1801,25 +1786,38 @@ async function saveToHistory() {
     crit_count: currentResult.critCount,
     criteria_json: JSON.stringify(currentResult.criteria)
   };
-  if(useSupabase && supabase){
+  if(useSheets && sheetsUrl){
     try {
-      const {error} = await supabase.from('evaluations').insert([payload]);
-      if(error){ console.error(error); alert('Ошибка сохранения в Supabase: ' + error.message); return; }
-    } catch(e) {
-      alert('Ошибка сохранения: ' + e.message);
+      var res = await fetch(sheetsUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload)
+      });
+      var data = await res.json();
+      if(data.error) throw new Error(data.error);
+      alert('Сохранено в Google Sheets!');
+      loadHistory();
       return;
+    } catch(e) {
+      console.error('Sheets save error:', e);
+      alert('Ошибка Sheets: ' + e.message + '. Сохраняем локально.');
     }
-  } else {
-    historyCache.unshift({...currentResult, id: Date.now()});
-    localStorage.setItem('call_eval_history', JSON.stringify(historyCache));
   }
-  alert('Сохранено!');
+  historyCache.unshift({...currentResult, id: Date.now()});
+  localStorage.setItem('call_eval_history', JSON.stringify(historyCache));
+  alert('Сохранено локально!');
 }
 
 async function clearHistory() {
   if(!confirm('Удалить всю историю? Это действие нельзя отменить.')) return;
-  if(useSupabase && supabase) {
-    try { await supabase.from('evaluations').delete().neq('id', 0); } catch(e){}
+  if(useSheets && sheetsUrl) {
+    try {
+      await fetch(sheetsUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'clear'})
+      });
+    } catch(e){}
   }
   historyCache = [];
   localStorage.removeItem('call_eval_history');
@@ -1829,8 +1827,14 @@ async function clearHistory() {
 
 async function deleteHistoryItem(id) {
   if(!confirm('Удалить эту запись?')) return;
-  if(useSupabase && supabase) {
-    try { await supabase.from('evaluations').delete().eq('id', id); } catch(e){}
+  if(useSheets && sheetsUrl) {
+    try {
+      await fetch(sheetsUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({action: 'delete', id: String(id)})
+      });
+    } catch(e){}
   }
   historyCache = historyCache.filter(h => String(h.id) !== String(id));
   localStorage.setItem('call_eval_history', JSON.stringify(historyCache));
@@ -2291,35 +2295,12 @@ function showTab(id, btn) {
 function showSetup() { document.getElementById('setup-overlay').classList.add('show'); }
 function closeSetup() { document.getElementById('setup-overlay').classList.remove('show'); }
 
-async function connectSupabase() {
+async function connectSheets() {
   var url = document.getElementById('setup-url').value.trim();
-  var key = document.getElementById('setup-key').value.trim();
-  if(!url || !key){ alert('Введите URL и ключ'); return; }
-  url = url.replace(/\/rest\/v1\/?$/i, '').replace(/\/$/, '');
-  if(!url.startsWith('https://')) { alert('URL должен начинаться с https://'); return; }
-  if(!key.startsWith('eyJ')) { alert('Похоже, вы вставили не тот ключ.\n\nНужен anon key (начинается с eyJ...), а не publishable key (sb_publishable_...).\n\nГде взять: Supabase Studio → Settings → API → Project API keys → anon public'); return; }
-  if(typeof window.supabase === 'undefined' || !window.supabase || !window.supabase.createClient) {
-    alert('Supabase SDK не загружен. Возможно, CDN заблокирован в вашей сети.\n\nРешения:\n1. Включите VPN\n2. Используйте мобильный интернет\n3. Обновите страницу через 10 секунд');
-    return;
-  }
-  var btn = document.querySelector('#setup-overlay .btn-primary');
-  if(btn) { btn.disabled = true; btn.textContent = 'Подключение...'; }
-  try {
-    var testClient = window.supabase.createClient(url, key);
-    var {error} = await testClient.from('evaluations').select('id').limit(1);
-    if(error && error.code !== 'PGRST116' && error.code !== '42P01' && error.code !== '404') throw error;
-    localStorage.setItem('sb_url', url);
-    localStorage.setItem('sb_key', key);
-    location.reload();
-  } catch(e) {
-    if(btn) { btn.disabled = false; btn.textContent = '🔗 Подключить'; }
-    var msg = e.message || String(e);
-    if(msg.indexOf('Failed to fetch') !== -1 || msg.indexOf('NetworkError') !== -1) {
-      alert('Ошибка сети. Проверьте URL (должен быть вида https://xxxx.supabase.co, без /rest/v1/) и интернет-соединение.');
-    } else {
-      alert('Ошибка подключения: ' + msg);
-    }
-  }
+  if(!url){ alert('Вставьте URL Web App'); return; }
+  if(!url.includes('script.google.com')){ alert('URL должен быть от Google Apps Script (script.google.com)'); return; }
+  localStorage.setItem('alfacom_sheets_url', url);
+  location.reload();
 }
 
 function exportResult() {
