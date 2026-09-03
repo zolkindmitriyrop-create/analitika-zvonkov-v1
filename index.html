@@ -2487,10 +2487,13 @@ async function transcribeAudio() {
     });
     bar.style.width = '50%';
     var data = await res.json();
-    if(data.error || data.error_code) throw new Error(data.error_message || data.error || 'Ошибка распознавания');
+    if(!res.ok || data.error || data.error_code || (data.code !== undefined && data.message)) {
+      var errText = data.message || data.error_message || data.error || ('HTTP ' + res.status);
+      throw new Error(errText);
+    }
 
     var operationId = data.id;
-    if(!operationId) throw new Error('Не получен ID операции распознавания');
+    if(!operationId) throw new Error('Не получен ID операции распознавания. Ответ сервера: ' + JSON.stringify(data).slice(0, 300));
 
     status.textContent = 'Распознавание в процессе...';
     var text = '';
